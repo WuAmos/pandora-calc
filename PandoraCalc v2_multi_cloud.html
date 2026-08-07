@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>放置天堂 - 黑市收購價與期望值計算器</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 650px;
+            background-color: #1e293b;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        h1 {
+            text-align: center;
+            color: #c084fc;
+            margin-top: 0;
+        }
+        .step-box {
+            background-color: #334155;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 6px;
+            border: 1px solid #475569;
+            background-color: #0f172a;
+            color: white;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        .search-container {
+            position: relative;
+            display: none;
+        }
+        #suggestion-list {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background-color: #1e293b;
+            border: 1px solid #475569;
+            border-radius: 6px;
+            list-style: none;
+            padding: 0;
+            margin: 5px 0 0 0;
+            max-height: 250px;
+            overflow-y: auto;
+            z-index: 10;
+        }
+        #suggestion-list li {
+            padding: 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #334155;
+        }
+        #suggestion-list li:hover {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .result-box {
+            margin-top: 25px;
+            padding: 20px;
+            background-color: #020617;
+            border: 1px solid #7c3aed;
+            border-radius: 8px;
+            display: none;
+        }
+        .result-box h3 {
+            margin-top: 0;
+            color: #38bdf8;
+            font-size: 1.5em;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 10px;
+        }
+        .price-highlight {
+            color: #facc15;
+            font-size: 1.3em;
+            font-weight: bold;
+        }
+        .error-msg {
+            color: #f87171;
+            font-weight: bold;
+        }
+        .expectation-box {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #1e293b;
+            border: 1px solid #64748b;
+            border-radius: 8px;
+        }
+        .calc-btn {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            background-color: #3b82f6;
+            color: white;
+            font-weight: bold;
+            font-size: 15px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: inline-block;
+            box-sizing: border-box;
+        }
+        .calc-btn:hover { background-color: #2563eb; }
+        .multi-zone {
+            margin-top: 15px;
+            background-color: #0f172a;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #475569;
+        }
+        .multi-content {
+            display: none; 
+            margin-top: 10px; 
+            padding-top: 10px; 
+            border-top: 1px dashed #334155;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>潘朵拉黑市分析器</h1>
+    
+    <div class="step-box">
+        <strong>步驟一：載入遊戲資料庫</strong><br>
+        <span style="font-size: 0.9em; color: #94a3b8;">請選擇連線自動載入最新版，或手動匯入本機檔案：</span>
+        
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button class="calc-btn" style="margin-top: 0; background-color: #10b981;" onclick="loadFromGitHub()">
+                🌐 自動載入 (GitHub)
+            </button>
+            <label class="calc-btn" style="margin-top: 0; background-color: #64748b; text-align: center;">
+                📂 手動選擇檔案
+                <input type="file" id="file-input" accept=".txt,.js" style="display: none;">
+            </label>
+        </div>
+        <div id="status-msg" style="margin-top: 12px; font-size: 0.95em;"></div>
+    </div>
+
+    <div class="search-container" id="search-container">
+        <strong>步驟二：搜尋裝備/魔法書/卡片</strong>
+        <input type="text" id="search-input" placeholder="輸入物品名稱 (支援模糊搜尋)..." autocomplete="off">
+        <ul id="suggestion-list"></ul>
+    </div>
+
+    <div class="result-box" id="result-box"></div>
+</div>
+
+<script>
+    let dbItems = null;
+    let currentCalc = null; 
+
+    function processData(rawText) {
+        const msgDiv = document.getElementById('status-msg');
+        try {
+            const oldScript = document.getElementById('db-script');
+            if (oldScript) oldScript.remove();
+
+            const script = document.createElement('script');
+            script.id = 'db-script';
+            script.textContent = rawText;
+            document.body.appendChild(script);
+
+            setTimeout(() => {
+                if (typeof DB !== 'undefined' && DB.items) {
+                    dbItems = DB.items;
+                    document.getElementById('search-container').style.display = 'block';
+                    document.getElementById('search-input').focus();
+                    msgDiv.innerHTML = `<span style="color: #34d399; font-weight: bold;">✅ 資料庫載入成功！共讀取了 ${Object.keys(dbItems).length.toLocaleString()} 筆資料。</span>`;
+                } else {
+                    msgDiv.innerHTML = '<span style="color: #f87171; font-weight: bold;">❌ 載入失敗：檔案中找不到 DB.items 資料結構。</span>';
+                }
+            }, 100);
+        } catch (err) {
+            msgDiv.innerHTML = `<span style="color: #f87171; font-weight: bold;">❌ 處理發生錯誤：${err}</span>`;
+        }
+    }
+
+    function loadFromGitHub() {
+        const msgDiv = document.getElementById('status-msg');
+        msgDiv.innerHTML = '<span style="color: #fbbf24;">🌐 正在從 GitHub 抓取最新資料，請稍候...</span>';
+        
+        const rawUrl = 'https://raw.githubusercontent.com/shines871/idle-lineage-class/refs/heads/main/js/00-data.js';
+        const cdnUrl = 'https://cdn.jsdelivr.net/gh/shines871/idle-lineage-class@main/js/00-data.js';
+
+        fetch(rawUrl)
+            .then(response => {
+                if (!response.ok) throw new Error('Raw 網址無回應');
+                return response.text();
+            })
+            .then(text => processData(text))
+            .catch(err => {
+                msgDiv.innerHTML = '<span style="color: #fbbf24;">⚠️ 切換至備用 CDN 線路載入中...</span>';
+                fetch(cdnUrl)
+                    .then(res => {
+                        if (!res.ok) throw new Error('CDN 無回應');
+                        return res.text();
+                    })
+                    .then(text => processData(text))
+                    .catch(err2 => {
+                        msgDiv.innerHTML = `<span style="color: #f87171; font-weight: bold;">❌ 自動載入失敗，請改用右側「手動選擇檔案」。</span>`;
+                    });
+            });
+    }
+
+    document.getElementById('file-input').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const msgDiv = document.getElementById('status-msg');
+        msgDiv.innerHTML = '<span style="color: #fbbf24;">📂 讀取本機檔案中...</span>';
+
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            processData(evt.target.result);
+        };
+        reader.readAsText(file);
+        this.value = '';
+    });
+
+    const searchInput = document.getElementById('search-input');
+    const suggestionList = document.getElementById('suggestion-list');
+    const resultBox = document.getElementById('result-box');
+
+    searchInput.addEventListener('input', function() {
+        const query = this.value.trim();
+        suggestionList.innerHTML = '';
+        if (query.length < 1 || !dbItems) return;
+
+        let results = [];
+        for (let id in dbItems) {
+            let item = dbItems[id];
+            if (item && item.n && item.n.includes(query)) {
+                results.push({ id: id, item: item });
+            }
+        }
+        results.sort((a, b) => a.item.n.length - b.item.n.length);
+        results.slice(0, 15).forEach(res => {
+            let li = document.createElement('li');
+            li.textContent = `${res.item.n} (${res.id})`;
+            li.onclick = () => selectItem(res.id, res.item);
+            suggestionList.appendChild(li);
+        });
+    });
+
+    document.addEventListener('click', function(e) {
+        if (e.target !== searchInput) suggestionList.innerHTML = '';
+    });
+
+    function selectItem(id, item) {
+        searchInput.value = item.n;
+        suggestionList.innerHTML = '';
+        resultBox.style.display = 'block';
+
+        let levelStr = "一般裝備/道具";
+        if (item.legend) {
+            levelStr = "👑 傳說級裝備 (Legend)";
+        } else if (item.gachaWeight != null && item.gachaWeight <= 1) {
+            levelStr = "💎 珍稀裝備 (Rare)";
+        }
+        if (item.type === 'skillbk') levelStr = "📕 魔法書";
+        if (item.eff === 'card') levelStr = `🎴 怪物卡片 (階級 ${item.cardTier || 1})`;
+
+        currentCalc = calculatePandoraPrice(id, item);
+
+        let html = `
+            <h3>${item.n}</h3>
+            <p><strong>物品代碼：</strong> ${id}</p>
+            <p><strong>物品級別：</strong> ${levelStr}</p>
+        `;
+
+        if (currentCalc.error) {
+            html += `<p class="error-msg">⛔ 無法收購：${currentCalc.error}</p>`;
+        } else {
+            let minP = currentCalc.min.toLocaleString();
+            let maxP = currentCalc.max.toLocaleString();
+            
+            html += `
+                <p><strong>浮動極限倍率：</strong> ${currentCalc.multDesc}</p>
+                <p><strong>💰 黑市出價範圍限制：</strong> <br>
+                   <span class="price-highlight">${minP} ~ ${maxP}</span> 金幣
+                </p>
+                
+                <div class="expectation-box">
+                    <h4 style="margin-top:0; color:#c084fc;">⏱️ 自訂出價與 95% 成交時間預估</h4>
+                    <p style="font-size:0.9em;">請輸入您打算在黑市掛單的金額：</p>
+                    <input type="number" id="user-bid" placeholder="例如：${Math.floor((currentCalc.min + currentCalc.max)/2)}">
+                    <button class="calc-btn" onclick="calculateExpectation()">計算單人期望時間</button>
+                    <div id="expectation-result" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #475569; display: none;"></div>
+                </div>
+            `;
+        }
+        resultBox.innerHTML = html;
+    }
+
+    function calculatePandoraPrice(id, item) {
+        if (item.eff === 'card' && item.cardMob) {
+            let t = parseInt(item.cardTier) || 1;
+            if (t === 1) return { min: 100000, max: 10000000, multDesc: "1階卡範圍" };
+            if (t === 2) return { min: 1000000, max: 100000000, multDesc: "2階卡範圍" };
+            if (t === 3) return { min: 10000000, max: 10000000000, multDesc: "3階卡範圍" };
+        }
+
+        let pEquipSlots = new Set(['helm', 'armor', 'cloak', 'gloves', 'boots', 'tshirt', 'shield', 'ring', 'amulet', 'belt']);
+        let isWearable = false;
+        
+        if (!item.relic && !item.remains && !item.doll && !item.isArrow && item.slot !== 'petwpn' && item.slot !== 'petarm') {
+            let slotStr = String(item.slot || '');
+            let isEarring = slotStr === 'ear' || slotStr === 'ear1' || slotStr === 'ear2' || /^acc_.*ear/.test(id) || String(item.n || '').includes('耳環');
+            if (item.type === 'wpn') isWearable = true;
+            if ((item.type === 'arm' || item.type === 'acc') && pEquipSlots.has(slotStr) && !isEarring) isWearable = true;
+        }
+
+        let isSkill = item.type === 'skillbk';
+        let isPanacea = item.eff === 'panacea';
+
+        if (!isWearable && !isSkill && !isPanacea) return { error: "該物品不符合黑市指定收購條件。" };
+
+        // 修正重點：把 gachaWeight <= 1 的「珍稀裝備」加入高級物品判斷
+        let isGachaRare = (item.gachaWeight != null && item.gachaWeight <= 1);
+        let premium = isSkill || (item.legend && isWearable) || isGachaRare;
+
+        let minMult = premium ? 100 : 10;
+        let maxMult = premium ? 2000 : 1000;
+        let base = Math.max(0, Number(item.p) || 0);
+        if (base <= 0 && isWearable) base = 100000;
+        if (base <= 0) base = 1000;
+
+        return { multDesc: `${minMult} 倍 ~ ${maxMult} 倍`, min: base * minMult, max: base * maxMult };
+    }
+
+    function calculateExpectation() {
+        if (!currentCalc) return;
+        let bid = parseInt(document.getElementById('user-bid').value);
+        let resDiv = document.getElementById('expectation-result');
+        resDiv.style.display = 'block'; 
+        
+        if (isNaN(bid) || bid <= 0) {
+            resDiv.innerHTML = '<span class="error-msg">請輸入有效的金幣數量。</span>';
+            return;
+        }
+        if (bid < currentCalc.min) {
+            resDiv.innerHTML = '<span class="error-msg">出價低於系統最低底價，單次成功率為 0%，永遠無法買到。</span>';
+            return;
+        }
+        if (bid >= currentCalc.max) {
+            resDiv.innerHTML = '<span style="color: #34d399; font-weight:bold;">出價高於最高底價！<br>單次成功率 100%，下一次系統刷新 (最多 10 分鐘) 必定買到！</span>';
+            return;
+        }
+
+        let possibleOutcomes = currentCalc.max - currentCalc.min + 1;
+        let winningOutcomes = bid - currentCalc.min + 1;
+        let p = winningOutcomes / possibleOutcomes;
+        
+        let n = Math.ceil(Math.log(0.05) / Math.log(1 - p));
+        let totalMinutes = n * 10;
+
+        let d = Math.floor(totalMinutes / (24 * 60));
+        let h = Math.floor((totalMinutes % (24 * 60)) / 60);
+        let m = totalMinutes % 60;
+        
+        let timeStr = '';
+        if (d > 0) timeStr += `${d} 天 `;
+        if (h > 0) timeStr += `${h} 小時 `;
+        if (m > 0 || timeStr === '') timeStr += `${m} 分鐘`;
+
+        resDiv.innerHTML = `
+            <p style="margin: 5px 0;">單次(每10分)成功機率：<strong style="color: #38bdf8;">${(p * 100).toFixed(4)} %</strong></p>
+            <p style="margin: 5px 0;">單人達 95% 把握需經過：<strong>${n.toLocaleString()} 次</strong> 刷新</p>
+            <p style="margin-top: 10px; font-size: 1.1em;">單人預估最長等待時間：<br>
+               <strong style="color: #facc15; font-size: 1.5em;">${timeStr}</strong>
+            </p>
+
+            <div class="multi-zone">
+                <label style="cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                    <input type="checkbox" id="multi-check" style="width: 18px; height: 18px; margin: 0;" onchange="toggleMultiCalc(${p})">
+                    <strong style="color: #34d399;">啟動多人同時掛單預估 (2-8人)</strong>
+                </label>
+                
+                <div id="multi-calc-zone" class="multi-content">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <span>同時掛單角色數：</span>
+                        <input type="number" id="multi-chars" value="2" min="2" max="8" style="width: 80px; margin: 0; padding: 5px;" oninput="updateMultiCalc(${p})">
+                    </div>
+                    <div id="multi-result-text"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    window.toggleMultiCalc = function(baseP) {
+        let zone = document.getElementById('multi-calc-zone');
+        let check = document.getElementById('multi-check');
+        if (check.checked) {
+            zone.style.display = 'block';
+            window.updateMultiCalc(baseP);
+        } else {
+            zone.style.display = 'none';
+        }
+    };
+
+    window.updateMultiCalc = function(baseP) {
+        let chars = parseInt(document.getElementById('multi-chars').value) || 2;
+        if (chars < 2) chars = 2;
+        if (chars > 8) chars = 8;
+        document.getElementById('multi-chars').value = chars;
+        
+        let pCombined = 1 - Math.pow(1 - baseP, chars);
+        let n = Math.ceil(Math.log(0.05) / Math.log(1 - pCombined));
+        let totalMinutes = n * 10;
+
+        let d = Math.floor(totalMinutes / (24 * 60));
+        let h = Math.floor((totalMinutes % (24 * 60)) / 60);
+        let m = totalMinutes % 60;
+        
+        let timeStr = '';
+        if (d > 0) timeStr += `${d} 天 `;
+        if (h > 0) timeStr += `${h} 小時 `;
+        if (m > 0 || timeStr === '') timeStr += `${m} 分鐘`;
+
+        document.getElementById('multi-result-text').innerHTML = `
+            <p style="margin: 5px 0;">👥 <strong>${chars}人</strong> 聯合單次命中率：<strong style="color: #38bdf8;">${(pCombined * 100).toFixed(4)} %</strong></p>
+            <p style="margin: 8px 0 0 0; font-size: 1.1em;">多開預估最長等待時間：<br>
+               <strong style="color: #10b981; font-size: 1.5em;">${timeStr}</strong>
+            </p>
+        `;
+    };
+</script>
+
+</body>
+</html>
